@@ -1,4 +1,3 @@
-
 use crate::dispute;
 use crate::RevocationData;
 use soroban_sdk::testutils::Address as _;
@@ -23,6 +22,7 @@ f: impl FnOnce(&Env) -> R,
 
 env.as_contract(contract, || f(env))
 }
+
 
 // -----------------------------------------------------------------------------
 // check_and_rollback_disputes adversarial coverage
@@ -296,115 +296,165 @@ assert!(
 
 #[test]
 fn get_dispute_ids_by_challenger_returns_empty_for_unknown_challenger() {
-    let (env, contract) = setup();
 
-    let challenger = Address::generate(&env);
+let (env, contract) = setup();
 
-    let ids = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
+let challenger = Address::generate(&env);
 
-    assert_eq!(
-        ids.len(),
-        0,
-        "an unknown challenger must have no associated dispute ids"
-    );
+let ids = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+assert_eq!(
+    ids.len(),
+
+    0,
+
+    "an unknown challenger must have no dispute ids"
+);
 }
 
 #[test]
-fn get_dispute_ids_by_challenger_is_scoped_to_the_challenger() {
-    let (env, contract) = setup();
+fn get_dispute_ids_by_challenger_is_scoped_to_challenger() {
 
-    let challenger = Address::generate(&env);
-    let other_challenger = Address::generate(&env);
+let (env, contract) = setup();
 
-    let ids = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
-    let other_ids = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &other_challenger)
-    });
+let challenger = Address::generate(&env);
 
-    assert_eq!(ids.len(), 0, "challenger must start with no disputes");
-    assert_eq!(
-        other_ids.len(),
-        0,
-        "querying one challenger must not leak another challenger's ids"
-    );
+let other_challenger = Address::generate(&env);
+
+in_contract(&env, &contract, |env| {
+
+dispute::add_dispute_id_by_challenger(env, &challenger, 1)
+
+});
+
+in_contract(&env, &contract, |env| {
+
+dispute::add_dispute_id_by_challenger(env, &challenger, 2)
+
+});
+
+in_contract(&env, &contract, |env| {
+
+dispute::add_dispute_id_by_challenger(env, &other_challenger, 99)
+
+});
+
+let ids = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+assert_eq!(ids.len(), 2, "only this challenger's ids must be returned");
+assert_eq!(ids.get(0).unwrap(), 1);
+assert_eq!(ids.get(1).unwrap(), 2);
+
+let other_ids = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &other_challenger)
+
+});
+
+assert_eq!(other_ids.len(), 1, "other challenger must be isolated");
+assert_eq!(other_ids.get(0).unwrap(), 99);
 }
 
 #[test]
-fn get_dispute_ids_by_challenger_is_deterministic() {
-    let (env, contract) = setup();
+fn get_dispute_ids_by_challenger_is_read_only() {
 
-    let challenger = Address::generate(&env);
+let (env, contract) = setup();
 
-    let first = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
-    let second = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
+let challenger = Address::generate(&env);
 
-    assert_eq!(
-        first.len(),
-        second.len(),
-        "repeated lookups must return the same number of ids"
-    );
-    for i in 0..first.len() {
-        assert_eq!(
-            first.get(i).unwrap(),
-            second.get(i).unwrap(),
-            "repeated lookups must return identical ids"
-        );
-    }
+in_contract(&env, &contract, |env| {
+
+dispute::add_dispute_id_by_challenger(env, &challenger, 42)
+
+});
+
+let first = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+let second = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+assert_eq!(first.len(), 1, "first read must observe stored id");
+assert_eq!(second.len(), 1, "repeated reads must be deterministic");
+assert_eq!(second.get(0).unwrap(), 42);
 }
 
 #[test]
 fn get_dispute_ids_by_challenger_does_not_mutate_revocation_state() {
-    let (env, contract) = setup();
 
-    let business = Address::generate(&env);
-    let challenger = Address::generate(&env);
-    let period = String::from_str(&env, "2026-09");
-    let reason = String::from_str(&env, "adversarial test revocation");
-    let revocation: RevocationData = (business.clone(), env.ledger().timestamp(), reason);
+let (env, contract) = setup();
 
-    in_contract(&env, &contract, |env| {
-        dispute::record_revocation(env, &business, &period, &revocation)
-    });
+let business = Address::generate(&env);
 
-    let _ = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
+let period = String::from_str(&env, "2026-09");
 
-    assert!(
-        in_contract(&env, &contract, |env| {
-            dispute::is_attestation_revoked(env, &business, &period)
-        }),
-        "read-only dispute lookup must not mutate revocation state"
-    );
+let reason = String::from_str(&env, "adversarial test revocation");
+
+let revocation: RevocationData = (business.clone(), env.ledger().timestamp(), reason);
+
+in_contract(&env, &contract, |env| {
+
+dispute::record_revocation(env, &business, &period, &revocation)
+
+});
+
+let challenger = Address::generate(&env);
+
+in_contract(&env, &contract, |env| {
+
+dispute::add_dispute_id_by_challenger(env, &challenger, 7)
+
+});
+
+let ids = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+assert_eq!(ids.len(), 1);
+assert!(in_contract(&env, &contract, |env| {
+
+dispute::is_attestation_revoked(env, &business, &period)
+
+}), "reads must not mutate revocation state");
 }
 
 #[test]
-fn get_dispute_ids_by_challenger_does_not_mutate_dispute_index() {
-    let (env, contract) = setup();
+fn get_dispute_ids_by_challenger_handles_empty_challenger_address() {
 
-    let challenger = Address::generate(&env);
+let (env, contract) = setup();
 
-    let before = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
-    let _ = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
-    let after = in_contract(&env, &contract, |env| {
-        dispute::get_dispute_ids_by_challenger(env, &challenger)
-    });
+let challenger = Address::from_str(
+    &env,
+    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+);
 
-    assert_eq!(
-        before.len(),
-        after.len(),
-        "lookups must not append or remove dispute ids"
-    );
+let ids = in_contract(&env, &contract, |env| {
+
+dispute::get_dispute_ids_by_challenger(env, &challenger)
+
+});
+
+assert_eq!(
+    ids.len(),
+
+    0,
+
+    "a valid but unused challenger address must yield no ids"
+);
 }
